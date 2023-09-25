@@ -79,11 +79,13 @@ func NewOpensearchV2Database(ctx context.Context, uri string) (database.LibraryO
 		return nil, fmt.Errorf("Failed to create ES client, %w", err)
 	}
 
+	/*
 	_, err = es_client.Indices.Create(es_index)
 
 	if err != nil {
 		return nil, fmt.Errorf("Failed to create index, %w", err)
 	}
+	*/
 
 	bi_cfg := go_opensearchutil.BulkIndexerConfig{
 		Index:         es_index,

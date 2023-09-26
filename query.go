@@ -9,7 +9,7 @@ type QueryResponse struct {
 }
 
 type QueryResponseHits struct {
-	Total   *QueryResponseTotal   `json:"total"`
+	Total   *QueryResponseTotal     `json:"total"`
 	Results []*database.QueryResult `json:"hits"`
 }
 

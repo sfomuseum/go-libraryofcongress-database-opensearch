@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/aaronland/go-pagination"
+	"github.com/aaronland/go-pagination/countable"
 	"github.com/cenkalti/backoff/v4"
 	go_opensearch "github.com/opensearch-project/opensearch-go/v2"
 	go_opensearchapi "github.com/opensearch-project/opensearch-go/v2/opensearchapi"
@@ -232,11 +233,21 @@ func (opensearch_db *OpensearchV2Database) Query(ctx context.Context, q string, 
 
 	q = fmt.Sprintf(`{"query": { "term": { "label": { "value": "%s" } } } }`, q)
 
+	size := int(pg_opts.PerPage())
+
 	req := go_opensearchapi.SearchRequest{
 		Index: []string{
 			opensearch_db.index,
 		},
 		Body: strings.NewReader(q),
+		Size: &size,
+	}
+
+	pg := int(countable.PageFromOptions(pg_opts))
+
+	if pg > 1 {
+		from := size * (pg - 1)
+		req.From = &from
 	}
 
 	rsp, err := req.Do(ctx, opensearch_db.client)
@@ -257,10 +268,16 @@ func (opensearch_db *OpensearchV2Database) Query(ctx context.Context, q string, 
 	}
 
 	results := query_rsp.Hits.Results
+	total := query_rsp.Hits.Total.Value
 
 	// enc := json.NewEncoder(os.Stdout)
 	// enc.Encode(query_rsp)
 
-	// This will panic because there is no pagination instance
-	return results, nil, nil
+	pg_results, err := countable.NewResultsFromCountWithOptions(pg_opts, int64(total))
+
+	if err != nil {
+		return nil, nil, fmt.Errorf("Failed to create response pagination, %w", err)
+	}
+
+	return results, pg_results, nil
 }

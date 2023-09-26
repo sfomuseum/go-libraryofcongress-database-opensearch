@@ -257,8 +257,9 @@ func (opensearch_db *OpensearchV2Database) Query(ctx context.Context, q string, 
 		q = fmt.Sprintf(`{"query": { "match_phrase": { "label.keyword": "%s" } } }`, q)
 	}
 
+	// START OF From and Size don't seem to be doing anything...
+
 	size := int(pg_opts.PerPage())
-	size = 100
 
 	req := go_opensearchapi.SearchRequest{
 		Index: []string{
@@ -268,10 +269,12 @@ func (opensearch_db *OpensearchV2Database) Query(ctx context.Context, q string, 
 		Size: &size,
 	}
 
+	// END OF From and Size don't seem to be doing anything...
+
 	pg := int(countable.PageFromOptions(pg_opts))
 
 	if pg > 1 {
-		from := size * (pg - 1)
+		from := (pg - 1) * size
 		req.From = &from
 	}
 
@@ -301,7 +304,6 @@ func (opensearch_db *OpensearchV2Database) Query(ctx context.Context, q string, 
 	results := make([]*database.QueryResult, total)
 
 	for idx, r := range query_rsp.Hits.Results {
-		log.Println(idx, r.Result)
 		results[idx] = r.Result
 	}
 
@@ -314,5 +316,6 @@ func (opensearch_db *OpensearchV2Database) Query(ctx context.Context, q string, 
 		return nil, nil, fmt.Errorf("Failed to create response pagination, %w", err)
 	}
 
+	log.Println(size, len(results))
 	return results, pg_results, nil
 }

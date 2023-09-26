@@ -53,8 +53,6 @@ $> ./bin/index \
 
 ```
 
-### STDIN
-
 It is also possible to index data from `STDIN` by specifying the string "-" as the `-lcsh-data` or `-lcnaf-data` URI to read.
 
 For example, this command will stream and parse the contents of `https://id.loc.gov/download/lcsh.both.ndjson.zip` (using the `parse-lcsh` tool in the [sfomuseum/go-libraryofcongress](https://github.com/sfomuseum/go-libraryofcongress#parse-lcsh) package) and index each subject header in an OpenSearch database.
@@ -123,3 +121,4 @@ All the libraries and tools in this package assume an OpenSearch schema matching
 
 * https://github.com/sfomuseum/go-libraryofcongress
 * https://github.com/sfomuseum/go-libraryofcongress-database
+* https://pkg.go.dev/github.com/opensearch-project/opensearch-go

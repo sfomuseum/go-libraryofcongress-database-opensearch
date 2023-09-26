@@ -26,10 +26,11 @@ import (
 
 type OpensearchV2Database struct {
 	database.LibraryOfCongressDatabase
-	client  *go_opensearch.Client
-	index   string
-	logger  *log.Logger
-	workers int
+	client   *go_opensearch.Client
+	index    string
+	logger   *log.Logger
+	workers  int
+	query_by string
 }
 
 func init() {
@@ -46,10 +47,12 @@ func NewOpensearchV2Database(ctx context.Context, uri string) (database.LibraryO
 		return nil, fmt.Errorf("Failed to parse URI, %w", err)
 	}
 
+	logger := log.New(io.Discard, "", 0)
+
 	workers := 10
 
 	debug := false
-	logger := log.New(io.Discard, "", 0)
+	query_by := "label"
 
 	q := u.Query()
 
@@ -57,6 +60,7 @@ func NewOpensearchV2Database(ctx context.Context, uri string) (database.LibraryO
 	os_index := q.Get("index")
 	str_workers := q.Get("workers")
 	q_debug := q.Get("debug")
+	q_query_by := q.Get("query-by")
 
 	if str_workers != "" {
 
@@ -79,6 +83,18 @@ func NewOpensearchV2Database(ctx context.Context, uri string) (database.LibraryO
 
 		debug = v
 		logger = log.New(os.Stdout, "", 0)
+	}
+
+	if q_query_by != "" {
+
+		switch q_query_by {
+		case "text", "label":
+			// pass
+		default:
+			return nil, fmt.Errorf("Invalid ?search-by= parameter")
+		}
+
+		query_by = q_query_by
 	}
 
 	retry := backoff.NewExponentialBackOff()
@@ -124,10 +140,11 @@ func NewOpensearchV2Database(ctx context.Context, uri string) (database.LibraryO
 	*/
 
 	opensearch_db := &OpensearchV2Database{
-		client:  os_client,
-		index:   os_index,
-		workers: workers,
-		logger:  logger,
+		client:   os_client,
+		index:    os_index,
+		workers:  workers,
+		logger:   logger,
+		query_by: query_by,
 	}
 
 	return opensearch_db, nil
@@ -231,9 +248,17 @@ func (opensearch_db *OpensearchV2Database) indexSource(ctx context.Context, inde
 
 func (opensearch_db *OpensearchV2Database) Query(ctx context.Context, q string, pg_opts pagination.Options) ([]*database.QueryResult, pagination.Results, error) {
 
-	q = fmt.Sprintf(`{"query": { "term": { "label": { "value": "%s" } } } }`, q)
+	// q = fmt.Sprintf(`{"query": { "term": { "search": { "value": "%s" } } } }`, q)
+
+	switch opensearch_db.query_by {
+	case "text":
+		q = fmt.Sprintf(`{"query": { "match_phrase": { "search": "%s" } } }`, q)
+	default:
+		q = fmt.Sprintf(`{"query": { "match_phrase": { "label.keyword": "%s" } } }`, q)
+	}
 
 	size := int(pg_opts.PerPage())
+	size = 100
 
 	req := go_opensearchapi.SearchRequest{
 		Index: []string{
@@ -258,7 +283,7 @@ func (opensearch_db *OpensearchV2Database) Query(ctx context.Context, q string, 
 
 	defer rsp.Body.Close()
 
-	if rsp.IsError(){
+	if rsp.IsError() {
 		return nil, nil, fmt.Errorf("Request failed with response: %s", rsp.Status())
 	}
 
@@ -271,8 +296,14 @@ func (opensearch_db *OpensearchV2Database) Query(ctx context.Context, q string, 
 		return nil, nil, fmt.Errorf("Failed to decode response, %w", err)
 	}
 
-	results := query_rsp.Hits.Results
 	total := query_rsp.Hits.Total.Value
+
+	results := make([]*database.QueryResult, total)
+
+	for idx, r := range query_rsp.Hits.Results {
+		log.Println(idx, r.Result)
+		results[idx] = r.Result
+	}
 
 	// enc := json.NewEncoder(os.Stdout)
 	// enc.Encode(query_rsp)

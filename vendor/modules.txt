@@ -26,7 +26,7 @@ github.com/sfomuseum/go-csvdict
 # github.com/sfomuseum/go-flags v0.10.0
 ## explicit; go 1.16
 github.com/sfomuseum/go-flags/flagset
-# github.com/sfomuseum/go-libraryofcongress-database v0.0.7
+# github.com/sfomuseum/go-libraryofcongress-database v0.1.0
 ## explicit; go 1.18
 github.com/sfomuseum/go-libraryofcongress-database
 github.com/sfomuseum/go-libraryofcongress-database/app/index

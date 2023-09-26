@@ -36,8 +36,8 @@ github.com/sfomuseum/go-csvdict v1.0.0 h1:ECLdgya7eXmJ8oJpk8JKmiUmQhahgXehHPWIC+
 github.com/sfomuseum/go-csvdict v1.0.0/go.mod h1:cXhcPaOj1q//WQpkcH1HEXeAdNd0N/P+EniPVNfnBxs=
 github.com/sfomuseum/go-flags v0.10.0 h1:1OC1ACxpWMsl3XQ9OeNVMQj7Zi2CzufP3Rym3mPI8HU=
 github.com/sfomuseum/go-flags v0.10.0/go.mod h1:VXOnnX1/yxQpX2yiwHaBV6aCmhtszQOL5bL1/nNo3co=
-github.com/sfomuseum/go-libraryofcongress-database v0.0.7 h1:rt3hu7HP2qytNKae0wGgEMbHe/7majNwO6WgLXe7Vss=
-github.com/sfomuseum/go-libraryofcongress-database v0.0.7/go.mod h1:mvKY45+vkXME2f3w1ca4tm60kCxcvryktjZa+m2/F6Y=
+github.com/sfomuseum/go-libraryofcongress-database v0.1.0 h1:YKSEPFGIpTxyPu4hyXFbLcM1Vvt8uin/iqyUuYgLihQ=
+github.com/sfomuseum/go-libraryofcongress-database v0.1.0/go.mod h1:n3dbL7bbNdcdx9GMNHPOb9M2pl5RzOlU7XzGwfjSY8Q=
 github.com/sfomuseum/go-timings v1.2.1 h1:AthtFBMBYN+kUflQUp9FFBZVHsR9KB/GkMvO1DuEYEE=
 github.com/sfomuseum/go-timings v1.2.1/go.mod h1:jZrCwV4uoY5s4sOZWZLn6xQ2LhsMy2ZvdB3tzLPO76c=
 github.com/sfomuseum/iso8601duration v1.1.0 h1:kMYzbamrZp9dRxi5iFuhjl5CzHXK6s6Bzz/c75wsq8Q=

@@ -13,7 +13,7 @@ require (
 	github.com/aaronland/go-pagination v0.2.0
 	github.com/cenkalti/backoff/v4 v4.2.1
 	github.com/opensearch-project/opensearch-go/v2 v2.0.0-00010101000000-000000000000
-	github.com/sfomuseum/go-libraryofcongress-database v0.0.7
+	github.com/sfomuseum/go-libraryofcongress-database v0.1.0
 	github.com/sfomuseum/go-timings v1.2.1
 )
 

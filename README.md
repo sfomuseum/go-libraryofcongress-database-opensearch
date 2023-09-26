@@ -1,6 +1,6 @@
 # go-libraryofcongress-database-opensearch
 
-Go package implementing the go-libraryofcongress-database.LibraryOfCongressDatabase interface for use with OpenSearch.
+Go package implementing the `sfomuseum/go-libraryofcongress-database.LibraryOfCongressDatabase` interface for use with OpenSearch.
 
 ## Documentation
 

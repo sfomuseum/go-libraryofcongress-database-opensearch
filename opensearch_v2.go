@@ -258,6 +258,10 @@ func (opensearch_db *OpensearchV2Database) Query(ctx context.Context, q string, 
 
 	defer rsp.Body.Close()
 
+	if rsp.IsError(){
+		return nil, nil, fmt.Errorf("Request failed with response: %s", rsp.Status())
+	}
+
 	var query_rsp *QueryResponse
 
 	dec := json.NewDecoder(rsp.Body)

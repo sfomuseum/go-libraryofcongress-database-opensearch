@@ -5,7 +5,7 @@ Go package implementing the `sfomuseum/go-libraryofcongress-database.LibraryOfCo
 ## Documentation
 
 Documentation is incomplete.
-
+ 
 ## Database URIs
 
 ```

@@ -247,7 +247,20 @@ func (opensearch_db *OpensearchV2Database) Query(ctx context.Context, q string, 
 
 	defer rsp.Body.Close()
 
-	_, err = io.Copy(os.Stdout, rsp.Body)
+	var query_rsp *QueryResponse
 
-	return nil, nil, fmt.Errorf("Not implemented")
+	dec := json.NewDecoder(rsp.Body)
+	err = dec.Decode(&query_rsp)
+
+	if err != nil {
+		return nil, nil, fmt.Errorf("Failed to decode response, %w", err)
+	}
+
+	results := query_rsp.Hits.Results
+
+	// enc := json.NewEncoder(os.Stdout)
+	// enc.Encode(query_rsp)
+
+	// This will panic because there is no pagination instance
+	return results, nil, nil
 }

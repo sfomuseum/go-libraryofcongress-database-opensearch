@@ -23,8 +23,10 @@ import (
 
 type OpensearchV2Database struct {
 	database.LibraryOfCongressDatabase
-	indexer go_opensearchutil.BulkIndexer
+	client  *go_opensearch.Client
+	index   string
 	logger  *log.Logger
+	workers int
 }
 
 func init() {
@@ -42,7 +44,7 @@ func NewOpensearchV2Database(ctx context.Context, uri string) (database.LibraryO
 	}
 
 	workers := 10
-	
+
 	debug := false
 	logger := log.New(io.Discard, "", 0)
 
@@ -111,35 +113,17 @@ func NewOpensearchV2Database(ctx context.Context, uri string) (database.LibraryO
 	}
 
 	/*
-	_, err = os_client.Indices.Create(os_index)
+		_, err = os_client.Indices.Create(os_index)
 
-	if err != nil {
-		return nil, fmt.Errorf("Failed to create index, %w", err)
-	}
+		if err != nil {
+			return nil, fmt.Errorf("Failed to create index, %w", err)
+		}
 	*/
 
-	bi_cfg := go_opensearchutil.BulkIndexerConfig{
-		Index:         os_index,
-		Client:        os_client,
-		NumWorkers:    workers,
-		FlushInterval: 30 * time.Second,
-		OnError: func(context.Context, error) {
-			logger.Printf("OPENSEARCH bulk indexer reported an error: %v\n", err)
-		},
-		// OnFlushStart func(context.Context) context.Context // Called when the flush starts.
-		OnFlushEnd: func(context.Context) {
-			logger.Printf("OPENSEARCH bulk indexer flush end")
-		},
-	}
-
-	indexer, err := go_opensearchutil.NewBulkIndexer(bi_cfg)
-
-	if err != nil {
-		return nil, fmt.Errorf("Failed to create bulk indexer, %w", err)
-	}
-
 	opensearch_db := &OpensearchV2Database{
-		indexer: indexer,
+		client:  os_client,
+		index:   os_index,
+		workers: workers,
 		logger:  logger,
 	}
 
@@ -148,28 +132,48 @@ func NewOpensearchV2Database(ctx context.Context, uri string) (database.LibraryO
 
 func (opensearch_db *OpensearchV2Database) Index(ctx context.Context, sources []*database.Source, monitor timings.Monitor) error {
 
+	bi_cfg := go_opensearchutil.BulkIndexerConfig{
+		Index:         opensearch_db.index,
+		Client:        opensearch_db.client,
+		NumWorkers:    opensearch_db.workers,
+		FlushInterval: 30 * time.Second,
+		OnError: func(ctx context.Context, err error) {
+			opensearch_db.logger.Printf("OPENSEARCH bulk indexer reported an error: %v\n", err)
+		},
+		// OnFlushStart func(context.Context) context.Context // Called when the flush starts.
+		OnFlushEnd: func(context.Context) {
+			opensearch_db.logger.Printf("OPENSEARCH bulk indexer flush end")
+		},
+	}
+
+	indexer, err := go_opensearchutil.NewBulkIndexer(bi_cfg)
+
+	if err != nil {
+		return fmt.Errorf("Failed to create bulk indexer, %w", err)
+	}
+
 	for _, src := range sources {
 
-		err := opensearch_db.indexSource(ctx, src, monitor)
+		err := opensearch_db.indexSource(ctx, indexer, src, monitor)
 
 		if err != nil {
 			return fmt.Errorf("Failed to index %s, %v", src.Label, err)
 		}
 	}
 
-	err := opensearch_db.indexer.Close(ctx)
+	err = indexer.Close(ctx)
 
 	if err != nil {
 		return fmt.Errorf("Failed to close indexer, %w", err)
 	}
 
-	stats := opensearch_db.indexer.Stats()
+	stats := indexer.Stats()
 	opensearch_db.logger.Printf("Stats %v\n", stats)
 
 	return nil
 }
 
-func (opensearch_db *OpensearchV2Database) indexSource(ctx context.Context, src *database.Source, monitor timings.Monitor) error {
+func (opensearch_db *OpensearchV2Database) indexSource(ctx context.Context, indexer go_opensearchutil.BulkIndexer, src *database.Source, monitor timings.Monitor) error {
 
 	cb := func(ctx context.Context, row map[string]string) error {
 
@@ -208,7 +212,7 @@ func (opensearch_db *OpensearchV2Database) indexSource(ctx context.Context, src 
 			},
 		}
 
-		err = opensearch_db.indexer.Add(ctx, bulk_item)
+		err = indexer.Add(ctx, bulk_item)
 
 		if err != nil {
 			opensearch_db.logger.Printf("Failed to schedule %s, %v", doc_id, err)

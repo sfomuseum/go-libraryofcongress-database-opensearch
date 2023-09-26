@@ -5,14 +5,17 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
 	"net/url"
+	"os"
 	"strconv"
 	"time"
 
 	"github.com/aaronland/go-pagination"
 	"github.com/cenkalti/backoff/v4"
 	go_opensearch "github.com/opensearch-project/opensearch-go/v2"
+	go_opensearchtransport "github.com/opensearch-project/opensearch-go/v2/opensearchtransport"
 	go_opensearchutil "github.com/opensearch-project/opensearch-go/v2/opensearchutil"
 	"github.com/sfomuseum/go-libraryofcongress-database"
 	"github.com/sfomuseum/go-timings"
@@ -21,6 +24,7 @@ import (
 type OpensearchV2Database struct {
 	database.LibraryOfCongressDatabase
 	indexer go_opensearchutil.BulkIndexer
+	logger  *log.Logger
 }
 
 func init() {
@@ -38,12 +42,16 @@ func NewOpensearchV2Database(ctx context.Context, uri string) (database.LibraryO
 	}
 
 	workers := 10
+	
+	debug := false
+	logger := log.New(io.Discard, "", 0)
 
 	q := u.Query()
 
-	es_endpoint := q.Get("endpoint")
-	es_index := q.Get("index")
+	os_endpoint := q.Get("endpoint")
+	os_index := q.Get("index")
 	str_workers := q.Get("workers")
+	q_debug := q.Get("debug")
 
 	if str_workers != "" {
 
@@ -56,11 +64,23 @@ func NewOpensearchV2Database(ctx context.Context, uri string) (database.LibraryO
 		workers = w
 	}
 
+	if q_debug != "" {
+
+		v, err := strconv.ParseBool(q_debug)
+
+		if err != nil {
+			return nil, fmt.Errorf("Failed to parse ?debug= parameter, %w", err)
+		}
+
+		debug = v
+		logger = log.New(os.Stdout, "", 0)
+	}
+
 	retry := backoff.NewExponentialBackOff()
 
-	es_cfg := go_opensearch.Config{
+	os_cfg := go_opensearch.Config{
 		Addresses: []string{
-			es_endpoint,
+			os_endpoint,
 		},
 
 		RetryOnStatus: []int{502, 503, 504, 429},
@@ -73,23 +93,41 @@ func NewOpensearchV2Database(ctx context.Context, uri string) (database.LibraryO
 		MaxRetries: 5,
 	}
 
-	es_client, err := go_opensearch.NewClient(es_cfg)
+	if debug {
+
+		opensearch_logger := &go_opensearchtransport.TextLogger{
+			Output:             os.Stdout,
+			EnableRequestBody:  true,
+			EnableResponseBody: true,
+		}
+
+		os_cfg.Logger = opensearch_logger
+	}
+
+	os_client, err := go_opensearch.NewClient(os_cfg)
 
 	if err != nil {
 		return nil, fmt.Errorf("Failed to create ES client, %w", err)
 	}
 
-	_, err = es_client.Indices.Create(es_index)
+	_, err = os_client.Indices.Create(os_index)
 
 	if err != nil {
 		return nil, fmt.Errorf("Failed to create index, %w", err)
 	}
 
 	bi_cfg := go_opensearchutil.BulkIndexerConfig{
-		Index:         es_index,
-		Client:        es_client,
+		Index:         os_index,
+		Client:        os_client,
 		NumWorkers:    workers,
 		FlushInterval: 30 * time.Second,
+		OnError: func(context.Context, error) {
+			logger.Printf("OPENSEARCH bulk indexer reported an error: %v\n", err)
+		},
+		// OnFlushStart func(context.Context) context.Context // Called when the flush starts.
+		OnFlushEnd: func(context.Context) {
+			logger.Printf("OPENSEARCH bulk indexer flush end")
+		},
 	}
 
 	indexer, err := go_opensearchutil.NewBulkIndexer(bi_cfg)
@@ -100,6 +138,7 @@ func NewOpensearchV2Database(ctx context.Context, uri string) (database.LibraryO
 
 	opensearch_db := &OpensearchV2Database{
 		indexer: indexer,
+		logger:  logger,
 	}
 
 	return opensearch_db, nil
@@ -115,6 +154,15 @@ func (opensearch_db *OpensearchV2Database) Index(ctx context.Context, sources []
 			return fmt.Errorf("Failed to index %s, %v", src.Label, err)
 		}
 	}
+
+	err := opensearch_db.indexer.Close(ctx)
+
+	if err != nil {
+		return fmt.Errorf("Failed to close indexer, %w", err)
+	}
+
+	stats := opensearch_db.indexer.Stats()
+	opensearch_db.logger.Printf("Stats %v\n", stats)
 
 	return nil
 }
@@ -151,9 +199,9 @@ func (opensearch_db *OpensearchV2Database) indexSource(ctx context.Context, src 
 
 			OnFailure: func(ctx context.Context, item go_opensearchutil.BulkIndexerItem, res go_opensearchutil.BulkIndexerResponseItem, err error) {
 				if err != nil {
-					log.Printf("ERROR: Failed to index %s, %s", doc_id, err)
+					opensearch_db.logger.Printf("ERROR: Failed to index %s, %s", doc_id, err)
 				} else {
-					log.Printf("ERROR: Failed to index %s, %s: %s", doc_id, res.Error.Type, res.Error.Reason)
+					opensearch_db.logger.Printf("ERROR: Failed to index %s, %s: %s", doc_id, res.Error.Type, res.Error.Reason)
 				}
 			},
 		}
@@ -161,7 +209,7 @@ func (opensearch_db *OpensearchV2Database) indexSource(ctx context.Context, src 
 		err = opensearch_db.indexer.Add(ctx, bulk_item)
 
 		if err != nil {
-			log.Printf("Failed to schedule %s, %v", doc_id, err)
+			opensearch_db.logger.Printf("Failed to schedule %s, %v", doc_id, err)
 			return nil
 		}
 

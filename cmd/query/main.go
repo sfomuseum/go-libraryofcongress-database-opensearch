@@ -4,8 +4,8 @@ import (
 	"context"
 	"log"
 
-	"github.com/sfomuseum/go-libraryofcongress-database/app/query"
 	_ "github.com/sfomuseum/go-libraryofcongress-database-opensearch"
+	"github.com/sfomuseum/go-libraryofcongress-database/app/query"
 )
 
 func main() {

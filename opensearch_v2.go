@@ -35,7 +35,6 @@ type OpensearchV2Database struct {
 
 func init() {
 	ctx := context.Background()
-	database.RegisterLibraryOfCongressDatabase(ctx, "opensearch", NewOpensearchV2Database)
 	database.RegisterLibraryOfCongressDatabase(ctx, "opensearchv2", NewOpensearchV2Database)
 }
 
@@ -54,6 +53,8 @@ func NewOpensearchV2Database(ctx context.Context, uri string) (database.LibraryO
 	debug := false
 	query_by := "label"
 
+	create_index := false
+
 	q := u.Query()
 
 	os_endpoint := q.Get("endpoint")
@@ -61,6 +62,7 @@ func NewOpensearchV2Database(ctx context.Context, uri string) (database.LibraryO
 	str_workers := q.Get("workers")
 	q_debug := q.Get("debug")
 	q_query_by := q.Get("query-by")
+	q_create_index := q.Get("create-index")
 
 	if str_workers != "" {
 
@@ -83,6 +85,17 @@ func NewOpensearchV2Database(ctx context.Context, uri string) (database.LibraryO
 
 		debug = v
 		logger = log.New(os.Stdout, "", 0)
+	}
+
+	if q_create_index != "" {
+
+		v, err := strconv.ParseBool(q_create_index)
+
+		if err != nil {
+			return nil, fmt.Errorf("Failed to parse ?create-index= parameter, %w", err)
+		}
+
+		create_index = v
 	}
 
 	if q_query_by != "" {
@@ -131,13 +144,14 @@ func NewOpensearchV2Database(ctx context.Context, uri string) (database.LibraryO
 		return nil, fmt.Errorf("Failed to create ES client, %w", err)
 	}
 
-	/*
+	if create_index {
+
 		_, err = os_client.Indices.Create(os_index)
 
 		if err != nil {
 			return nil, fmt.Errorf("Failed to create index, %w", err)
 		}
-	*/
+	}
 
 	opensearch_db := &OpensearchV2Database{
 		client:   os_client,
@@ -301,7 +315,7 @@ func (opensearch_db *OpensearchV2Database) Query(ctx context.Context, q string, 
 
 	total := query_rsp.Hits.Total.Value
 
-	results := make([]*database.QueryResult, total)
+	results := make([]*database.QueryResult, len(query_rsp.Hits.Results))
 
 	for idx, r := range query_rsp.Hits.Results {
 		results[idx] = r.Result
@@ -316,6 +330,5 @@ func (opensearch_db *OpensearchV2Database) Query(ctx context.Context, q string, 
 		return nil, nil, fmt.Errorf("Failed to create response pagination, %w", err)
 	}
 
-	log.Println(size, len(results))
 	return results, pg_results, nil
 }

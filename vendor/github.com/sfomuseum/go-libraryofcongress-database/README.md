@@ -28,6 +28,12 @@ This package used to bundle a bunch of different implementations of the `Library
 
 * [StdoutDatabase](stdout/database.go) which implements the indexing methods of the `LibraryOfCongressDatabase` interface and simply emits each record as a CSV-encoded row to STDOUT. This package is really only for testing and debugging purposes and to serve as a simple reference implementation for creating your own implementations.
 
+Other database implementations include:
+
+* https://github.com/sfomuseum/go-libraryofcongress-database-docstore
+* https://github.com/sfomuseum/go-libraryofcongress-database-opensearch
+* https://github.com/sfomuseum/go-libraryofcongress-database-elasticsearch
+
 ## Tools
 
 ```
@@ -39,12 +45,22 @@ go build -mod vendor -ldflags="-s -w" --tags fts5 -o bin/index cmd/index/main.go
 
 ### index
 
+```
+$> ./bin/index -h
+  -database-uri string
+    	A valid sfomuseum/go-libraryofcongress-database URI.
+  -lcnaf-data string
+    	The path to your LCNAF CSV data. If '-' then data will be read from STDIN.
+  -lcsh-data string
+    	The path to your LCSH CSV data. If '-' then data will be read from STDIN.
+```
+
 _Note that the index tool expects to index CSV data produced by the `sfomuseum/go-libraryofcongress` [parse-lcnaf](https://github.com/sfomuseum/go-libraryofcongress#parse-lcnaf) and [parse-lcsh](https://github.com/sfomuseum/go-libraryofcongress#parse-lcsh) tools._
 
 #### SQL (SQLite)
 
 ```
-$> ./bin/index -database-uri 'sql://sqlite?dsn=test.db' -lcsh-data /usr/local/data/lcsh.csv.bz2
+$> ./bin/index -database-uri 'sql://sqlite?dsn=loc.db' -lcsh-data /usr/local/data/lcsh.csv.bz2
 processed 5692 records in 1m0.001390571s (started 2021-10-27 15:52:35.790947 -0700 PDT m=+0.015128394)
 processed 11161 records in 2m0.001847245s (started 2021-10-27 15:52:35.790947 -0700 PDT m=+0.015128394)
 processed 16179 records in 3m0.000195064s (started 2021-10-27 15:52:35.790947 -0700 PDT m=+0.015128394)
@@ -56,15 +72,21 @@ processed 441373 records in 2h4m0.002261248s (started 2021-10-27 15:52:35.790947
 processed 444805 records in 2h5m0.002327734s (started 2021-10-27 15:52:35.790947 -0700 PDT m=+0.015128394)
 2021/10/27 17:58:09 Finished indexing lcsh
 
-$> du -h -d 1 /usr/local/data/libraryofcongress.db/
-761M	libraryofcongress.db/
+$> du -h -d 1 /usr/local/data/loc.db/
+761M	loc.db/
 ```
 
-It is also possible to index data from `STDIN`, for example using the output of the `parse-lcsh` tool in the [sfomuseum/go-libraryofcongress](https://github.com/sfomuseum/go-libraryofcongress#parse-lcsh) package:
+#### STDIN
+
+It is also possible to index data from `STDIN` by specifying the string "-" as the `-lcsh-data` or `-lcnaf-data` URI to read.
+
+For example, this command will stream and parse the contents of `https://id.loc.gov/download/lcsh.both.ndjson.zip` (using the `parse-lcsh` tool in the [sfomuseum/go-libraryofcongress](https://github.com/sfomuseum/go-libraryofcongress#parse-lcsh) package) and index each subject header in a SQLite database called `'loc.db`
 
 ```
-$> ./bin/parse-lcsh https://id.loc.gov/download/lcsh.both.ndjson.zip | \
-	../go-libraryofcongress-database/bin/index -database-uri 'sql://sqlite?dsn=test.db' -lcsh-data -
+$> ./parse-lcsh https://id.loc.gov/download/lcsh.both.ndjson.zip | \
+	./index \
+	-database-uri 'sql://sqlite?dsn=loc.db' \
+	-lcsh-data -
 ```
 
 ### server
@@ -134,6 +156,14 @@ $> curl -s 'http://localhost:8080/api/query?q=SQL' | jq
 
 ### query
 
+```
+$> ./bin/query -h
+  -cursor-pagination
+    	Signal that pagination is cursor-based rather than countable.
+  -database-uri string
+    	A valid sfomuseum/go-libraryofcongress-database URI.
+```
+
 The `query` tool is a command-line application to perform fulltext queries against a database generated using data produced by the tools in `sfomuseum/go-libraryofcongress` package.
 
 #### SQL (SQLite)
@@ -174,7 +204,3 @@ And then visit `http://localhost:8080` in a web browser.
 ## See also
 
 * https://github.com/sfomuseum/go-libraryofcongress
-* https://github.com/sfomuseum/go-libraryofcongress-database-docstore
-* https://github.com/sfomuseum/go-libraryofcongress-database-opensearch
-* https://github.com/sfomuseum/go-libraryofcongress-database-elasticsearch
-* https://github.com/sfomuseum/go-libraryofcongress-database-bleve

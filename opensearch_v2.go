@@ -10,11 +10,13 @@ import (
 	"net/url"
 	"os"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/aaronland/go-pagination"
 	"github.com/cenkalti/backoff/v4"
 	go_opensearch "github.com/opensearch-project/opensearch-go/v2"
+	go_opensearchapi "github.com/opensearch-project/opensearch-go/v2/opensearchapi"
 	go_opensearchtransport "github.com/opensearch-project/opensearch-go/v2/opensearchtransport"
 	go_opensearchutil "github.com/opensearch-project/opensearch-go/v2/opensearchutil"
 	"github.com/sfomuseum/go-libraryofcongress-database"
@@ -227,6 +229,25 @@ func (opensearch_db *OpensearchV2Database) indexSource(ctx context.Context, inde
 }
 
 func (opensearch_db *OpensearchV2Database) Query(ctx context.Context, q string, pg_opts pagination.Options) ([]*database.QueryResult, pagination.Results, error) {
+
+	q = fmt.Sprintf(`{"query": { "term": { "label": { "value": "%s" } } } }`, q)
+
+	req := go_opensearchapi.SearchRequest{
+		Index: []string{
+			opensearch_db.index,
+		},
+		Body: strings.NewReader(q),
+	}
+
+	rsp, err := req.Do(ctx, opensearch_db.client)
+
+	if err != nil {
+		return nil, nil, fmt.Errorf("Failed to perform query, %q", err)
+	}
+
+	defer rsp.Body.Close()
+
+	_, err = io.Copy(os.Stdout, rsp.Body)
 
 	return nil, nil, fmt.Errorf("Not implemented")
 }

@@ -32,6 +32,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"io/ioutil"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -42,6 +43,7 @@ import (
 var debugLogger DebuggingLogger
 
 // Logger defines an interface for logging request and response.
+//
 type Logger interface {
 	// LogRoundTrip should not modify the request or response, except for consuming and closing the body.
 	// Implementations have to check for nil values in request and response.
@@ -53,12 +55,14 @@ type Logger interface {
 }
 
 // DebuggingLogger defines the interface for a debugging logger.
+//
 type DebuggingLogger interface {
 	Log(a ...interface{}) error
 	Logf(format string, a ...interface{}) error
 }
 
 // TextLogger prints the log message in plain text.
+//
 type TextLogger struct {
 	Output             io.Writer
 	EnableRequestBody  bool
@@ -66,6 +70,7 @@ type TextLogger struct {
 }
 
 // ColorLogger prints the log message in a terminal-optimized plain text.
+//
 type ColorLogger struct {
 	Output             io.Writer
 	EnableRequestBody  bool
@@ -73,6 +78,7 @@ type ColorLogger struct {
 }
 
 // CurlLogger prints the log message as a runnable curl command.
+//
 type CurlLogger struct {
 	Output             io.Writer
 	EnableRequestBody  bool
@@ -80,6 +86,7 @@ type CurlLogger struct {
 }
 
 // JSONLogger prints the log message as JSON.
+//
 type JSONLogger struct {
 	Output             io.Writer
 	EnableRequestBody  bool
@@ -87,11 +94,13 @@ type JSONLogger struct {
 }
 
 // debuggingLogger prints debug messages as plain text.
+//
 type debuggingLogger struct {
 	Output io.Writer
 }
 
 // LogRoundTrip prints the information about request and response.
+//
 func (l *TextLogger) LogRoundTrip(req *http.Request, res *http.Response, err error, start time.Time, dur time.Duration) error {
 	fmt.Fprintf(l.Output, "%s %s %s [status:%d request:%s]\n",
 		start.Format(time.RFC3339),
@@ -129,7 +138,8 @@ func (l *TextLogger) RequestBodyEnabled() bool { return l.EnableRequestBody }
 func (l *TextLogger) ResponseBodyEnabled() bool { return l.EnableResponseBody }
 
 // LogRoundTrip prints the information about request and response.
-func (l *ColorLogger) LogRoundTrip(req *http.Request, res *http.Response, err error, _ time.Time, dur time.Duration) error {
+//
+func (l *ColorLogger) LogRoundTrip(req *http.Request, res *http.Response, err error, start time.Time, dur time.Duration) error {
 	query, _ := url.QueryUnescape(req.URL.RawQuery)
 	if query != "" {
 		query = "?" + query
@@ -203,7 +213,8 @@ func (l *ColorLogger) RequestBodyEnabled() bool { return l.EnableRequestBody }
 func (l *ColorLogger) ResponseBodyEnabled() bool { return l.EnableResponseBody }
 
 // LogRoundTrip prints the information about request and response.
-func (l *CurlLogger) LogRoundTrip(req *http.Request, res *http.Response, _ error, start time.Time, dur time.Duration) error {
+//
+func (l *CurlLogger) LogRoundTrip(req *http.Request, res *http.Response, err error, start time.Time, dur time.Duration) error {
 	var b bytes.Buffer
 
 	var query string
@@ -221,7 +232,7 @@ func (l *CurlLogger) LogRoundTrip(req *http.Request, res *http.Response, _ error
 	}
 
 	b.WriteString(`curl`)
-	if req.Method == http.MethodHead {
+	if req.Method == "HEAD" {
 		b.WriteString(" --head")
 	} else {
 		fmt.Fprintf(&b, " -X %s", req.Method)
@@ -266,7 +277,8 @@ func (l *CurlLogger) LogRoundTrip(req *http.Request, res *http.Response, _ error
 
 	b.WriteRune('\n')
 
-	status := res.Status
+	var status string
+	status = res.Status
 
 	fmt.Fprintf(&b, "# => %s [%s] %s\n", start.UTC().Format(time.RFC3339), status, dur.Truncate(time.Millisecond))
 	if l.ResponseBodyEnabled() && res != nil && res.Body != nil && res.Body != http.NoBody {
@@ -295,12 +307,13 @@ func (l *CurlLogger) RequestBodyEnabled() bool { return l.EnableRequestBody }
 func (l *CurlLogger) ResponseBodyEnabled() bool { return l.EnableResponseBody }
 
 // LogRoundTrip prints the information about request and response.
+//
 func (l *JSONLogger) LogRoundTrip(req *http.Request, res *http.Response, err error, start time.Time, dur time.Duration) error {
 	// TODO: Research performance optimization of using sync.Pool
 
 	bsize := 200
-	b := bytes.NewBuffer(make([]byte, 0, bsize))
-	v := make([]byte, 0, bsize)
+	var b = bytes.NewBuffer(make([]byte, 0, bsize))
+	var v = make([]byte, 0, bsize)
 
 	appendTime := func(t time.Time) {
 		v = v[:0]
@@ -320,6 +333,8 @@ func (l *JSONLogger) LogRoundTrip(req *http.Request, res *http.Response, err err
 		b.Write(v)
 	}
 
+	port := req.URL.Port()
+
 	b.WriteRune('{')
 	// -- Timestamp
 	b.WriteString(`"@timestamp":"`)
@@ -336,7 +351,7 @@ func (l *JSONLogger) LogRoundTrip(req *http.Request, res *http.Response, err err
 	appendQuote(req.URL.Scheme)
 	b.WriteString(`,"domain":`)
 	appendQuote(req.URL.Hostname())
-	if port := req.URL.Port(); port != "" {
+	if port != "" {
 		b.WriteString(`,"port":`)
 		b.WriteString(port)
 	}
@@ -400,12 +415,14 @@ func (l *JSONLogger) RequestBodyEnabled() bool { return l.EnableRequestBody }
 func (l *JSONLogger) ResponseBodyEnabled() bool { return l.EnableResponseBody }
 
 // Log prints the arguments to output in default format.
+//
 func (l *debuggingLogger) Log(a ...interface{}) error {
 	_, err := fmt.Fprint(l.Output, a...)
 	return err
 }
 
 // Logf prints formats the arguments and prints them to output.
+//
 func (l *debuggingLogger) Logf(format string, a ...interface{}) error {
 	_, err := fmt.Fprintf(l.Output, format, a...)
 	return err
@@ -427,14 +444,13 @@ func duplicateBody(body io.ReadCloser) (io.ReadCloser, io.ReadCloser, error) {
 		b2 bytes.Buffer
 		tr = io.TeeReader(body, &b2)
 	)
-
-	if _, err := b1.ReadFrom(tr); err != nil {
-		return io.NopCloser(io.MultiReader(&b1, errorReader{err: err})), io.NopCloser(io.MultiReader(&b2, errorReader{err: err})), err
+	_, err := b1.ReadFrom(tr)
+	if err != nil {
+		return ioutil.NopCloser(io.MultiReader(&b1, errorReader{err: err})), ioutil.NopCloser(io.MultiReader(&b2, errorReader{err: err})), err
 	}
-
 	defer func() { body.Close() }()
 
-	return io.NopCloser(&b1), io.NopCloser(&b2), nil
+	return ioutil.NopCloser(&b1), ioutil.NopCloser(&b2), nil
 }
 
 func resStatusCode(res *http.Response) int {
@@ -446,4 +462,4 @@ func resStatusCode(res *http.Response) int {
 
 type errorReader struct{ err error }
 
-func (r errorReader) Read(_ []byte) (int, error) { return 0, r.err }
+func (r errorReader) Read(p []byte) (int, error) { return 0, r.err }

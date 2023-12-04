@@ -33,27 +33,46 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/ioutil"
 	"net"
 	"net/http"
 	"net/url"
 	"os"
 	"regexp"
 	"runtime"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
 
-	"github.com/opensearch-project/opensearch-go/v2/internal/version"
 	"github.com/opensearch-project/opensearch-go/v2/signer"
+
+	"github.com/opensearch-project/opensearch-go/v2/internal/version"
 )
 
 const (
 	// Version returns the package version as a string.
-	Version           = version.Client
-	defaultMaxRetries = 3
+	Version = version.Client
+
+	// esCompatHeader defines the env var for Compatibility header.
+	esCompatHeader = "ELASTIC_CLIENT_APIVERSIONING"
 )
 
-var reGoVersion = regexp.MustCompile(`go(\d+\.\d+\..+)`)
+var (
+	userAgent           string
+	compatibilityHeader bool
+	reGoVersion         = regexp.MustCompile(`go(\d+\.\d+\..+)`)
+
+	defaultMaxRetries    = 3
+	defaultRetryOnStatus = [...]int{502, 503, 504}
+)
+
+func init() {
+	userAgent = initUserAgent()
+
+	compatHeaderEnv := os.Getenv(esCompatHeader)
+	compatibilityHeader, _ = strconv.ParseBool(compatHeaderEnv)
+}
 
 // Interface defines the interface for HTTP client.
 type Interface interface {
@@ -95,11 +114,10 @@ type Config struct {
 type Client struct {
 	sync.Mutex
 
-	urls      []*url.URL
-	username  string
-	password  string
-	header    http.Header
-	userAgent string
+	urls     []*url.URL
+	username string
+	password string
+	header   http.Header
 
 	signer signer.Signer
 
@@ -146,17 +164,17 @@ func New(cfg Config) (*Client, error) {
 		cfg.Transport = httpTransport
 	}
 
-	if len(cfg.RetryOnStatus) == 0 && cfg.RetryOnStatus == nil {
-		cfg.RetryOnStatus = []int{502, 503, 504}
+	if len(cfg.RetryOnStatus) == 0 {
+		cfg.RetryOnStatus = defaultRetryOnStatus[:]
 	}
 
 	if cfg.MaxRetries == 0 {
 		cfg.MaxRetries = defaultMaxRetries
 	}
 
-	conns := make([]*Connection, len(cfg.URLs))
-	for idx, u := range cfg.URLs {
-		conns[idx] = &Connection{URL: u}
+	var conns []*Connection
+	for _, u := range cfg.URLs {
+		conns = append(conns, &Connection{URL: u})
 	}
 
 	client := Client{
@@ -182,12 +200,10 @@ func New(cfg Config) (*Client, error) {
 		poolFunc:  cfg.ConnectionPoolFunc,
 	}
 
-	client.userAgent = initUserAgent()
-
 	if client.poolFunc != nil {
 		client.pool = client.poolFunc(conns, client.selector)
 	} else {
-		client.pool = NewConnectionPool(conns, client.selector)
+		client.pool, _ = NewConnectionPool(conns, client.selector)
 	}
 
 	if cfg.EnableDebugLogger {
@@ -207,7 +223,7 @@ func New(cfg Config) (*Client, error) {
 
 	if client.discoverNodesInterval > 0 {
 		time.AfterFunc(client.discoverNodesInterval, func() {
-			client.scheduleDiscoverNodes()
+			client.scheduleDiscoverNodes(client.discoverNodesInterval)
 		})
 	}
 
@@ -220,6 +236,14 @@ func (c *Client) Perform(req *http.Request) (*http.Response, error) {
 		res *http.Response
 		err error
 	)
+
+	// Compatibility Header
+	if compatibilityHeader {
+		if req.Body != nil {
+			req.Header.Set("Content-Type", "application/vnd.elasticsearch+json;compatible-with=7")
+		}
+		req.Header.Set("Accept", "application/vnd.elasticsearch+json;compatible-with=7")
+	}
 
 	// Record metrics, when enabled
 	if c.metrics != nil {
@@ -237,31 +261,30 @@ func (c *Client) Perform(req *http.Request) (*http.Response, error) {
 			var buf bytes.Buffer
 			zw := gzip.NewWriter(&buf)
 			if _, err := io.Copy(zw, req.Body); err != nil {
-				return nil, fmt.Errorf("failed to compress request body: %w", err)
+				return nil, fmt.Errorf("failed to compress request body: %s", err)
 			}
 			if err := zw.Close(); err != nil {
-				return nil, fmt.Errorf("failed to compress request body (during close): %w", err)
+				return nil, fmt.Errorf("failed to compress request body (during close): %s", err)
 			}
 
 			req.GetBody = func() (io.ReadCloser, error) {
 				r := buf
-				return io.NopCloser(&r), nil
+				return ioutil.NopCloser(&r), nil
 			}
-			//nolint:errcheck // error is always nil
 			req.Body, _ = req.GetBody()
 
 			req.Header.Set("Content-Encoding", "gzip")
 			req.ContentLength = int64(buf.Len())
+
 		} else if req.GetBody == nil {
 			if !c.disableRetry || (c.logger != nil && c.logger.RequestBodyEnabled()) {
 				var buf bytes.Buffer
-				//nolint:errcheck // ignored as this is only for logging
 				buf.ReadFrom(req.Body)
+
 				req.GetBody = func() (io.ReadCloser, error) {
 					r := buf
-					return io.NopCloser(&r), nil
+					return ioutil.NopCloser(&r), nil
 				}
-				//nolint:errcheck // error is always nil
 				req.Body, _ = req.GetBody()
 			}
 		}
@@ -282,7 +305,7 @@ func (c *Client) Perform(req *http.Request) (*http.Response, error) {
 			if c.logger != nil {
 				c.logRoundTrip(req, nil, err, time.Time{}, time.Duration(0))
 			}
-			return nil, fmt.Errorf("cannot get connection: %w", err)
+			return nil, fmt.Errorf("cannot get connection: %s", err)
 		}
 
 		// Update request
@@ -290,13 +313,13 @@ func (c *Client) Perform(req *http.Request) (*http.Response, error) {
 		c.setReqAuth(conn.URL, req)
 
 		if err = c.signRequest(req); err != nil {
-			return nil, fmt.Errorf("failed to sign request: %w", err)
+			return nil, fmt.Errorf("failed to sign request: %s", err)
 		}
 
 		if !c.disableRetry && i > 0 && req.Body != nil && req.Body != http.NoBody {
 			body, err := req.GetBody()
 			if err != nil {
-				return nil, fmt.Errorf("cannot get request body: %w", err)
+				return nil, fmt.Errorf("cannot get request body: %s", err)
 			}
 			req.Body = body
 		}
@@ -309,7 +332,6 @@ func (c *Client) Perform(req *http.Request) (*http.Response, error) {
 		// Log request and response
 		if c.logger != nil {
 			if c.logger.RequestBodyEnabled() && req.Body != nil && req.Body != http.NoBody {
-				//nolint:errcheck // ignored as this is only for logging
 				req.Body, _ = req.GetBody()
 			}
 			c.logRoundTrip(req, res, err, start, dur)
@@ -325,19 +347,17 @@ func (c *Client) Perform(req *http.Request) (*http.Response, error) {
 
 			// Report the connection as unsuccessful
 			c.Lock()
-			//nolint:errcheck // Questionable if the function even returns an error
 			c.pool.OnFailure(conn)
 			c.Unlock()
 
 			// Retry on EOF errors
-			if errors.Is(err, io.EOF) {
+			if err == io.EOF {
 				shouldRetry = true
 			}
 
 			// Retry on network errors, but not on timeout errors, unless configured
-			var netError net.Error
-			if errors.As(err, &netError) {
-				if (!netError.Timeout() || c.enableRetryOnTimeout) && !c.disableRetry {
+			if err, ok := err.(net.Error); ok {
+				if (!err.Timeout() || c.enableRetryOnTimeout) && !c.disableRetry {
 					shouldRetry = true
 				}
 			}
@@ -372,8 +392,7 @@ func (c *Client) Perform(req *http.Request) (*http.Response, error) {
 		// Drain and close body when retrying after response
 		if shouldCloseBody && i < c.maxRetries {
 			if res.Body != nil {
-				//nolint:errcheck // undexpected but okay if it failes
-				io.Copy(io.Discard, res.Body)
+				io.Copy(ioutil.Discard, res.Body)
 				res.Body.Close()
 			}
 		}
@@ -383,7 +402,7 @@ func (c *Client) Perform(req *http.Request) (*http.Response, error) {
 			time.Sleep(c.retryBackoff(i + 1))
 		}
 	}
-	// Read, close and replace the http response body to close the connection
+	// Read, close and replace the http reponse body to close the connection
 	if res != nil && res.Body != nil {
 		body, err := io.ReadAll(res.Body)
 		res.Body.Close()
@@ -401,7 +420,7 @@ func (c *Client) URLs() []*url.URL {
 	return c.pool.URLs()
 }
 
-func (c *Client) setReqURL(u *url.URL, req *http.Request) {
+func (c *Client) setReqURL(u *url.URL, req *http.Request) *http.Request {
 	req.URL.Scheme = u.Scheme
 	req.URL.Host = u.Host
 
@@ -412,21 +431,25 @@ func (c *Client) setReqURL(u *url.URL, req *http.Request) {
 		b.WriteString(req.URL.Path)
 		req.URL.Path = b.String()
 	}
+
+	return req
 }
 
-func (c *Client) setReqAuth(u *url.URL, req *http.Request) {
+func (c *Client) setReqAuth(u *url.URL, req *http.Request) *http.Request {
 	if _, ok := req.Header["Authorization"]; !ok {
 		if u.User != nil {
 			password, _ := u.User.Password()
 			req.SetBasicAuth(u.User.Username(), password)
-			return
+			return req
 		}
 
 		if c.username != "" && c.password != "" {
 			req.SetBasicAuth(c.username, c.password)
-			return
+			return req
 		}
 	}
+
+	return req
 }
 
 func (c *Client) signRequest(req *http.Request) error {
@@ -436,11 +459,12 @@ func (c *Client) signRequest(req *http.Request) error {
 	return nil
 }
 
-func (c *Client) setReqUserAgent(req *http.Request) {
-	req.Header.Set("User-Agent", c.userAgent)
+func (c *Client) setReqUserAgent(req *http.Request) *http.Request {
+	req.Header.Set("User-Agent", userAgent)
+	return req
 }
 
-func (c *Client) setReqGlobalHeader(req *http.Request) {
+func (c *Client) setReqGlobalHeader(req *http.Request) *http.Request {
 	if len(c.header) > 0 {
 		for k, v := range c.header {
 			if req.Header.Get(k) != k {
@@ -450,6 +474,7 @@ func (c *Client) setReqGlobalHeader(req *http.Request) {
 			}
 		}
 	}
+	return req
 }
 
 func (c *Client) logRoundTrip(
@@ -463,18 +488,14 @@ func (c *Client) logRoundTrip(
 	if res != nil {
 		dupRes = *res
 	}
-
 	if c.logger.ResponseBodyEnabled() {
 		if res != nil && res.Body != nil && res.Body != http.NoBody {
-			//nolint:errcheck // ignored as this is only for logging
 			b1, b2, _ := duplicateBody(res.Body)
 			dupRes.Body = b1
 			res.Body = b2
 		}
 	}
-
-	//nolint:errcheck // ignored as this is only for logging
-	c.logger.LogRoundTrip(req, &dupRes, err, start, dur)
+	c.logger.LogRoundTrip(req, &dupRes, err, start, dur) // errcheck exclude
 }
 
 func initUserAgent() string {
